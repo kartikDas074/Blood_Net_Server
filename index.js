@@ -91,7 +91,65 @@ async function run() {
         });
       }
     };
+    const verifyAdmin = (req, res, next) => {
+      if (req.user?.role !== "admin") {
+        return res.status(403).json({
+          success: false,
+          message: "Admin access required",
+        });
+      }
 
+      next();
+    };
+    const verifyVolunteer = (req, res, next) => {
+      if (req.user?.role !== "volunteer") {
+        return res.status(403).json({
+          success: false,
+          message: "Volunteer access required",
+        });
+      }
+
+      next();
+    };
+    const verifyDonor = (req, res, next) => {
+      if (req.user?.role !== "donor") {
+        return res.status(403).json({
+          success: false,
+          message: "Donor access required",
+        });
+      }
+
+      next();
+    };
+
+    app.post("/donation-request", VerifyToken, async (req, res) => {
+      try {
+        const data = req.body;
+
+        // User can only create requests for themselves
+        if (data.userId !== req.user._id.toString()) {
+          return res.status(403).json({
+            success: false,
+            message: "Forbidden access",
+          });
+        }
+
+        const result = await DonationRequest.insertOne(data);
+
+        return res.status(201).json({
+          success: true,
+          message: "Donation request created successfully",
+          insertedId: result.insertedId,
+        });
+      } catch (error) {
+        console.error("Error creating donation request:", error);
+
+        return res.status(500).json({
+          success: false,
+          message: "Internal server error",
+        });
+      }
+    });
     await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!",
