@@ -122,6 +122,106 @@ async function run() {
       next();
     };
 
+    app.get("/allusers", VerifyToken, verifyAdmin, async (req, res) => {
+      try {
+        const page = Math.max(Number(req.query.page) || 1, 1);
+        const limit = Math.max(Number(req.query.limit) || 10, 1);
+        const skip = (page - 1) * limit;
+
+        const query = {};
+
+        if (req.query.status && req.query.status !== "all") {
+          query.status = req.query.status;
+        }
+
+        const users = await userCollection
+          .find(query)
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limit)
+          .toArray();
+
+        const total = await userCollection.countDocuments(query);
+
+        const [
+          totalUsers,
+          activeUsers,
+          blockedUsers,
+          donorUsers,
+          volunteerUsers,
+          adminUsers,
+        ] = await Promise.all([
+          userCollection.countDocuments(),
+          userCollection.countDocuments({ status: "active" }),
+          userCollection.countDocuments({ status: "blocked" }),
+          userCollection.countDocuments({ role: "donor" }),
+          userCollection.countDocuments({ role: "volunteer" }),
+          userCollection.countDocuments({ role: "admin" }),
+        ]);
+
+        return res.status(200).json({
+          success: true,
+          data: users,
+
+          statistics: {
+            totalUsers,
+            activeUsers,
+            blockedUsers,
+            donorUsers,
+            volunteerUsers,
+            adminUsers,
+          },
+
+          pagination: {
+            page,
+            limit,
+            total,
+            totalPages: Math.ceil(total / limit),
+            hasNext: page < Math.ceil(total / limit),
+            hasPrev: page > 1,
+          },
+        });
+      } catch (error) {
+        console.error(error);
+
+        return res.status(500).json({
+          success: false,
+          message: "Internal server error",
+        });
+      }
+    });
+
+    app.patch("/user/:id", VerifyToken, verifyAdmin, async (req, res) => {
+      try {
+        const id = new ObjectId(req.params.id);
+        const data = req.body;
+
+        const result = await userCollection.updateOne(
+          { _id: id },
+          { $set: data },
+        );
+
+        if (result.matchedCount === 0) {
+          return res.status(404).json({
+            success: false,
+            message: "User not found",
+          });
+        }
+
+        return res.status(200).json({
+          success: true,
+          message: "User updated successfully",
+          data: result,
+        });
+      } catch (error) {
+        console.error("Error updating user:", error);
+
+        return res.status(500).json({
+          success: false,
+          message: "Internal server error",
+        });
+      }
+    });
     app.patch("/api/profile", VerifyToken, async (req, res) => {
       try {
         const { name, image, blood_group, district, upazila } = req.body;
@@ -133,7 +233,6 @@ async function run() {
         if (blood_group !== undefined) updateData.blood_group = blood_group;
         if (district !== undefined) updateData.district = district;
         if (upazila !== undefined) updateData.upazila = upazila;
-
 
         const result = await userCollection.updateOne(
           {
@@ -453,6 +552,54 @@ async function run() {
         });
       } catch (error) {
         console.error("Error deleting donation request:", error);
+
+        return res.status(500).json({
+          success: false,
+          message: "Internal server error",
+        });
+      }
+    });
+    app.get("/api/my-request/latest", VerifyToken, async (req, res) => {
+      try {
+        const requesterId = req.user._id.toString();
+
+        const [
+          latestRequests,
+          totalRequests,
+          pendingRequests,
+          completedRequests,
+        ] = await Promise.all([
+          DonationRequest.find({ requester_id: requesterId })
+            .sort({ createdAt: -1 })
+            .limit(3)
+            .toArray(),
+
+          DonationRequest.countDocuments({
+            requester_id: requesterId,
+          }),
+
+          DonationRequest.countDocuments({
+            requester_id: requesterId,
+            status: "pending",
+          }),
+
+          DonationRequest.countDocuments({
+            requester_id: requesterId,
+            status: "done",
+          }),
+        ]);
+
+        return res.status(200).json({
+          success: true,
+          data: latestRequests,
+          statistics: {
+            totalRequests,
+            pendingRequests,
+            completedRequests,
+          },
+        });
+      } catch (error) {
+        console.error("Error fetching dashboard data:", error);
 
         return res.status(500).json({
           success: false,
