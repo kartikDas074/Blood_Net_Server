@@ -267,7 +267,7 @@ async function run() {
       }
     });
 
-    app.patch("/api/roleUpdate/:id", VerifyToken, async (req, res) => {
+    app.patch("/api/statusUpdate/:id", VerifyToken, async (req, res) => {
       try {
         if (
           req.user.role === "donor" &&
