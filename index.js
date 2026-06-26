@@ -266,6 +266,53 @@ async function run() {
         });
       }
     });
+
+    app.patch("/api/roleUpdate/:id", VerifyToken, async (req, res) => {
+      try {
+        if (
+          req.user.role === "donor" &&
+          req.query.id !== req.user._id.toString()
+        ) {
+          return res.status(403).json({
+            success: false,
+            message: "Forbidden access",
+          });
+        }
+
+        const id = new ObjectId(req.params.id);
+
+        const data = {
+          ...req.body,
+          updatedAt: new Date(),
+        };
+
+        const result = await DonationRequest.updateOne(
+          { _id: id },
+          {
+            $set: data,
+          },
+        );
+
+        if (result.matchedCount === 0) {
+          return res.status(404).json({
+            success: false,
+            message: "Donation request not found",
+          });
+        }
+
+        return res.status(200).json({
+          success: true,
+          message: "Donation request updated successfully",
+        });
+      } catch (error) {
+        console.error("Error updating donation request:", error);
+
+        return res.status(500).json({
+          success: false,
+          message: "Internal server error",
+        });
+      }
+    });
     await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!",
