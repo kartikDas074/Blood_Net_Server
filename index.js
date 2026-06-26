@@ -49,9 +49,9 @@ async function run() {
             message: "Unauthorized access",
           });
         }
-        
+
         const token = authHeader.split(" ")[1];
-        console.log('our token',token);
+        console.log("our token", token);
         if (!token) {
           return res.status(401).json({
             success: false,
@@ -155,7 +155,6 @@ async function run() {
       }
     });
 
-    
     app.get("/api/my-request", VerifyToken, async (req, res) => {
       try {
         if (req.query.id !== req.user._id.toString()) {
@@ -216,6 +215,50 @@ async function run() {
         });
       } catch (error) {
         console.error("Error fetching donation requests:", error);
+
+        return res.status(500).json({
+          success: false,
+          message: "Internal server error",
+        });
+      }
+    });
+
+    app.patch("/api/my-request/:id", VerifyToken, async (req, res) => {
+      try {
+        if (req.query.id !== req.user._id.toString()) {
+          return res.status(403).json({
+            success: false,
+            message: "Forbidden access",
+          });
+        }
+
+        const id = new ObjectId(req.params.id);
+
+        const data = {
+          ...req.body,
+          updatedAt: new Date(),
+        };
+
+        const result = await DonationRequest.updateOne(
+          { _id: id },
+          {
+            $set: data,
+          },
+        );
+
+        if (result.matchedCount === 0) {
+          return res.status(404).json({
+            success: false,
+            message: "Donation request not found",
+          });
+        }
+
+        return res.status(200).json({
+          success: true,
+          message: "Donation request updated successfully",
+        });
+      } catch (error) {
+        console.error("Error updating donation request:", error);
 
         return res.status(500).json({
           success: false,
