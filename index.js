@@ -122,6 +122,76 @@ async function run() {
       next();
     };
 
+    app.patch("/api/profile", VerifyToken, async (req, res) => {
+      try {
+        const { name, image, blood_group, district, upazila } = req.body;
+
+        const updateData = {};
+
+        if (name !== undefined) updateData.name = name;
+        if (image !== undefined) updateData.image = image;
+        if (blood_group !== undefined) updateData.blood_group = blood_group;
+        if (district !== undefined) updateData.district = district;
+        if (upazila !== undefined) updateData.upazila = upazila;
+
+
+        const result = await userCollection.updateOne(
+          {
+            _id: req.user._id,
+          },
+          {
+            $set: updateData,
+          },
+        );
+
+        if (result.matchedCount === 0) {
+          return res.status(404).json({
+            success: false,
+            message: "User not found",
+          });
+        }
+
+        return res.status(200).json({
+          success: true,
+          message: "Profile updated successfully",
+        });
+      } catch (error) {
+        console.error("Error updating profile:", error);
+
+        return res.status(500).json({
+          success: false,
+          message: "Internal server error",
+        });
+      }
+    });
+
+    app.get("/api/donationRequest/:id", VerifyToken, async (req, res) => {
+      try {
+        const id = new ObjectId(req.params.id);
+
+        const result = await DonationRequest.findOne({ _id: id });
+
+        if (!result) {
+          return res.status(404).json({
+            success: false,
+            message: "Donation request not found",
+          });
+        }
+
+        return res.status(200).json({
+          success: true,
+          data: result,
+        });
+      } catch (error) {
+        console.error("Error fetching donation request:", error);
+
+        return res.status(500).json({
+          success: false,
+          message: "Internal server error",
+        });
+      }
+    });
+
     app.post("/donation-request", VerifyToken, async (req, res) => {
       try {
         const data = req.body;
@@ -306,6 +376,83 @@ async function run() {
         });
       } catch (error) {
         console.error("Error updating donation request:", error);
+
+        return res.status(500).json({
+          success: false,
+          message: "Internal server error",
+        });
+      }
+    });
+
+    app.patch("/api/donate/:id", VerifyToken, async (req, res) => {
+      try {
+        const id = new ObjectId(req.params.id);
+
+        const updateData = {
+          status: "inprogress",
+          updatedAt: new Date(),
+        };
+
+        const result = await DonationRequest.updateOne(
+          { _id: id },
+          {
+            $set: updateData,
+          },
+        );
+
+        if (result.matchedCount === 0) {
+          return res.status(404).json({
+            success: false,
+            message: "Donation request not found",
+          });
+        }
+
+        return res.status(200).json({
+          success: true,
+          message: "Donation confirmed successfully",
+        });
+      } catch (error) {
+        console.error("Error confirming donation:", error);
+
+        return res.status(500).json({
+          success: false,
+          message: "Internal server error",
+        });
+      }
+    });
+
+    app.delete("/api/deleteRequest/:id", VerifyToken, async (req, res) => {
+      try {
+        const id = new ObjectId(req.params.id);
+
+        let filter = { _id: id };
+
+        if (req.user.role === "donor" || req.user.role === "volunteer") {
+          if (req.query.id !== req.user._id.toString()) {
+            return res.status(403).json({
+              success: false,
+              message: "Forbidden access",
+            });
+          }
+
+          filter.requester_id = req.user._id.toString();
+        }
+        console.log(filter);
+        const result = await DonationRequest.deleteOne(filter);
+
+        if (result.deletedCount === 0) {
+          return res.status(404).json({
+            success: false,
+            message: "Donation request not found",
+          });
+        }
+
+        return res.status(200).json({
+          success: true,
+          message: "Donation request deleted successfully",
+        });
+      } catch (error) {
+        console.error("Error deleting donation request:", error);
 
         return res.status(500).json({
           success: false,
