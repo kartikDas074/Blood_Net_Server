@@ -2,7 +2,7 @@ const express = require("express");
 const dotenv = require("dotenv");
 const cors = require("cors");
 
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
 dotenv.config();
 
@@ -37,21 +37,21 @@ async function run() {
     const DB = await client.db("BloodNet");
     const DonationRequest = DB.collection("DonationRequest");
     const Session = DB.collection("session");
-    const user = DB.collection("user");
+    const userCollection = DB.collection("user");
 
     const VerifyToken = async (req, res, next) => {
       try {
         const authHeader = req.headers?.authorization;
-
+        console.log(authHeader);
         if (!authHeader || !authHeader.startsWith("Bearer ")) {
           return res.status(401).json({
             success: false,
             message: "Unauthorized access",
           });
         }
-
+        
         const token = authHeader.split(" ")[1];
-
+        console.log('our token',token);
         if (!token) {
           return res.status(401).json({
             success: false,
@@ -71,7 +71,7 @@ async function run() {
         const user = await userCollection.findOne({
           _id: new ObjectId(session.userId),
         });
-
+        console.log(user);
         if (!user) {
           return res.status(404).json({
             success: false,
@@ -126,15 +126,19 @@ async function run() {
       try {
         const data = req.body;
 
-        // User can only create requests for themselves
-        if (data.userId !== req.user._id.toString()) {
+        if (data.requester_id !== req.user._id.toString()) {
           return res.status(403).json({
             success: false,
             message: "Forbidden access",
           });
         }
 
-        const result = await DonationRequest.insertOne(data);
+        const donationRequest = {
+          ...data,
+          createdAt: new Date(),
+        };
+
+        const result = await DonationRequest.insertOne(donationRequest);
 
         return res.status(201).json({
           success: true,
@@ -150,13 +154,82 @@ async function run() {
         });
       }
     });
+
+    
+    app.get("/api/my-request", VerifyToken, async (req, res) => {
+      try {
+        if (req.query.id !== req.user._id.toString()) {
+          return res.status(403).json({
+            success: false,
+            message: "Forbidden access",
+          });
+        }
+        const query = {};
+        if (req.query.id) {
+          query.requester_id = req.query.id;
+        }
+
+        if (req.query.status) {
+          query.status = req.query.status;
+        }
+
+        if (req.query.search) {
+          query.$or = [
+            {
+              recipient_name: {
+                $regex: req.query.search,
+                $options: "i",
+              },
+            },
+            {
+              hospital_name: {
+                $regex: req.query.search,
+                $options: "i",
+              },
+            },
+          ];
+        }
+
+        const page = Number(req.query.page) || 1;
+        const limit = Number(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+
+        const result = await DonationRequest.find(query)
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limit)
+          .toArray();
+
+        const total = await DonationRequest.countDocuments(query);
+        console.log(result);
+        return res.status(200).json({
+          success: true,
+          data: result,
+          pagination: {
+            page,
+            limit,
+            total,
+            totalPages: Math.ceil(total / limit),
+            hasNext: page < Math.ceil(total / limit),
+            hasPrev: page > 1,
+          },
+        });
+      } catch (error) {
+        console.error("Error fetching donation requests:", error);
+
+        return res.status(500).json({
+          success: false,
+          message: "Internal server error",
+        });
+      }
+    });
     await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!",
     );
   } finally {
     // Ensures that the client will close when you finish/error
-    await client.close();
+    //await client.close();
   }
 }
 run().catch(console.dir);
