@@ -121,6 +121,47 @@ async function run() {
 
       next();
     };
+    app.get("/api/allInfo", VerifyToken, verifyAdmin, async (req, res) => {
+      try {
+        const [
+          totalUsers,
+          totalDonations,
+          totalAdmins,
+          totalVolunteers,
+          totalDonors,
+          totalActive,
+          totalBlocked,
+        ] = await Promise.all([
+          userCollection.countDocuments(),
+          DonationRequest.countDocuments(),
+          userCollection.countDocuments({ role: "admin" }),
+          userCollection.countDocuments({ role: "volunteer" }),
+          userCollection.countDocuments({ role: "donor" }),
+          userCollection.countDocuments({ status: "active" }),
+          userCollection.countDocuments({ status: "blocked" }),
+        ]);
+
+        return res.status(200).json({
+          success: true,
+          statistics: {
+            totalUsers,
+            totalDonations,
+            totalAdmins,
+            totalVolunteers,
+            totalDonors,
+            totalActive,
+            totalBlocked,
+          },
+        });
+      } catch (error) {
+        console.error("Error fetching dashboard statistics:", error);
+
+        return res.status(500).json({
+          success: false,
+          message: "Failed to fetch dashboard statistics",
+        });
+      }
+    });
 
     app.get("/allusers", VerifyToken, verifyAdmin, async (req, res) => {
       try {
@@ -392,9 +433,131 @@ async function run() {
       }
     });
 
+    app.get("/api/get-request", VerifyToken, async (req, res) => {
+      try {
+        if (req.user.role === "seeker") {
+          return res.status(403).json({
+            success: false,
+            message: "Unauthorized access",
+          });
+        }
+
+        const query = {};
+
+        if (req.query.id) {
+          query.requester_id = req.query.id;
+        }
+
+        if (req.query.status) {
+          query.status = req.query.status;
+        }
+
+        if (req.query.search) {
+          query.$or = [
+            {
+              recipient_name: {
+                $regex: req.query.search,
+                $options: "i",
+              },
+            },
+            {
+              hospital_name: {
+                $regex: req.query.search,
+                $options: "i",
+              },
+            },
+          ];
+        }
+
+        const page = Number(req.query.page) || 1;
+        const limit = Number(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+
+        // Current page data
+        const result = await DonationRequest.find(query)
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limit)
+          .toArray();
+
+        console.log("3");
+        const total = await DonationRequest.countDocuments(query);
+
+        // ---------- Statistics ----------
+        const requesterQuery = {};
+
+        if (req.query.id) {
+          requesterQuery.requester_id = req.query.id;
+        }
+
+        const [
+          totalRequests,
+          pendingRequests,
+          inprogressRequests,
+          completedRequests,
+          cancelledRequests,
+        ] = await Promise.all([
+          DonationRequest.countDocuments(requesterQuery),
+
+          DonationRequest.countDocuments({
+            ...requesterQuery,
+            status: "pending",
+          }),
+
+          DonationRequest.countDocuments({
+            ...requesterQuery,
+            status: "inprogress",
+          }),
+
+          DonationRequest.countDocuments({
+            ...requesterQuery,
+            status: "done",
+          }),
+
+          DonationRequest.countDocuments({
+            ...requesterQuery,
+            status: "canceled",
+          }),
+        ]);
+
+        return res.status(200).json({
+          success: true,
+
+          data: result,
+
+          statistics: {
+            totalRequests,
+            pendingRequests,
+            inprogressRequests,
+            completedRequests,
+            cancelledRequests,
+          },
+
+          pagination: {
+            page,
+            limit,
+            total,
+            totalPages: Math.ceil(total / limit),
+            hasNext: page < Math.ceil(total / limit),
+            hasPrev: page > 1,
+          },
+        });
+      } catch (error) {
+        console.error("Error fetching donation requests:", error);
+
+        return res.status(500).json({
+          success: false,
+          message: "Internal server error",
+        });
+      }
+    });
+
     app.patch("/api/my-request/:id", VerifyToken, async (req, res) => {
       try {
-        if (req.query.id !== req.user._id.toString()) {
+        if (
+          (req.user.role === "donor" || req.user.role == "volunteer") &&
+          req.query.id !== req.user._id.toString()
+        ) {
           return res.status(403).json({
             success: false,
             message: "Forbidden access",
@@ -526,7 +689,7 @@ async function run() {
 
         let filter = { _id: id };
 
-        if (req.user.role === "donor" || req.user.role === "volunteer") {
+        if (req.user.role === "donor" || req.user.role == "volunteer") {
           if (req.query.id !== req.user._id.toString()) {
             return res.status(403).json({
               success: false,
