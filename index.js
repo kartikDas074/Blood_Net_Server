@@ -1,11 +1,12 @@
 const express = require("express");
 const dotenv = require("dotenv");
+
 const cors = require("cors");
 
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
 dotenv.config();
-
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const app = express();
 const PORT = process.env.PORT;
 
@@ -38,7 +39,7 @@ async function run() {
     const DonationRequest = DB.collection("DonationRequest");
     const Session = DB.collection("session");
     const userCollection = DB.collection("user");
-
+    const funding = DB.collection("Funding");
     const VerifyToken = async (req, res, next) => {
       try {
         const authHeader = req.headers?.authorization;
@@ -121,7 +122,7 @@ async function run() {
 
       next();
     };
-    app.get("/api/allInfo", VerifyToken, verifyAdmin, async (req, res) => {
+    app.get("/api/allInfo", VerifyToken, async (req, res) => {
       try {
         const [
           totalUsers,
@@ -444,9 +445,9 @@ async function run() {
 
         const query = {};
 
-        if (req.query.id) {
-          query.requester_id = req.query.id;
-        }
+        // if (req.query.id) {
+        //   query.requester_id = req.query.id;
+        // }
 
         if (req.query.status) {
           query.status = req.query.status;
@@ -486,9 +487,9 @@ async function run() {
         // ---------- Statistics ----------
         const requesterQuery = {};
 
-        if (req.query.id) {
-          requesterQuery.requester_id = req.query.id;
-        }
+        // if (req.query.id) {
+        //   requesterQuery.requester_id = req.query.id;
+        // }
 
         const [
           totalRequests,
@@ -519,7 +520,7 @@ async function run() {
             status: "canceled",
           }),
         ]);
-
+        console.log(result);
         return res.status(200).json({
           success: true,
 
@@ -554,17 +555,18 @@ async function run() {
 
     app.patch("/api/my-request/:id", VerifyToken, async (req, res) => {
       try {
-        if (
-          (req.user.role === "donor" || req.user.role == "volunteer") &&
-          req.query.id !== req.user._id.toString()
-        ) {
-          return res.status(403).json({
-            success: false,
-            message: "Forbidden access",
-          });
+        const query = {};
+        if (req.user.role === "donor" || req.user.role === "volunteer") {
+          if (req.query.id !== req.user._id.toString()) {
+            return res.status(403).json({
+              success: false,
+              message: "Forbidden access",
+            });
+          }
+          query.requester_id = req.user._id.toString();
         }
 
-        const id = new ObjectId(req.params.id);
+        query._id = new ObjectId(req.params.id);
 
         const data = {
           ...req.body,
@@ -572,7 +574,7 @@ async function run() {
         };
 
         const result = await DonationRequest.updateOne(
-          { _id: id },
+          { ...query },
           {
             $set: data,
           },
@@ -601,25 +603,25 @@ async function run() {
 
     app.patch("/api/statusUpdate/:id", VerifyToken, async (req, res) => {
       try {
-        if (
-          req.user.role === "donor" &&
-          req.query.id !== req.user._id.toString()
-        ) {
-          return res.status(403).json({
-            success: false,
-            message: "Forbidden access",
-          });
+        const query = {};
+        if (req.user.role === "donor") {
+          if (req.query.id !== req.user._id.toString()) {
+            return res.status(403).json({
+              success: false,
+              message: "Forbidden access",
+            });
+          }
+          query.requester_id = req.user._id.toString();
         }
-
         const id = new ObjectId(req.params.id);
-
+        query._id = id;
         const data = {
           ...req.body,
           updatedAt: new Date(),
         };
 
         const result = await DonationRequest.updateOne(
-          { _id: id },
+          { ...query },
           {
             $set: data,
           },
@@ -767,6 +769,82 @@ async function run() {
         return res.status(500).json({
           success: false,
           message: "Internal server error",
+        });
+      }
+    });
+
+   
+    app.post("/api/verify-payment", VerifyToken, async (req, res) => {
+      try {
+        const { session_id } = req.body;
+
+        if (!session_id) {
+          return res.status(400).json({
+            success: false,
+            message: "Missing session_id in request body",
+          });
+        }
+
+       
+        const session = await stripe.checkout.sessions.retrieve(session_id);
+
+       
+        if (
+          session.payment_status !== "paid" ||
+          session.status !== "complete"
+        ) {
+          return res.status(400).json({
+            success: false,
+            message: "Payment verification failed on Stripe side",
+          });
+        }
+
+       
+        const sessionUserId = session.metadata?.userId;
+        if (sessionUserId !== req.user._id.toString()) {
+          return res.status(403).json({
+            success: false,
+            message: "Security Alert! User identifier mismatch.",
+          });
+        }
+
+        
+        const isAlreadyProcessed = await funding.findOne({
+          stripeSessionId: session_id,
+        });
+        if (isAlreadyProcessed) {
+          return res.status(200).json({
+            success: true,
+            message: "Payment already verified and recorded",
+          });
+        }
+
+       
+        const donationData = {
+          userId: req.user._id,
+          userName: req.user.name,
+          userEmail: session.customer_details?.email || req.user.email,
+          amount: Number(
+            session.metadata?.amount || session.amount_total / 100,
+          ), 
+          stripeSessionId: session_id,
+          paymentStatus: "COMPLETED",
+          createdAt: new Date(),
+        };
+
+        const result = await funding.insertOne(donationData);
+
+        return res.status(201).json({
+          success: true,
+          message: "Payment verified successfully and saved to MongoDB!",
+          insertedId: result.insertedId,
+        });
+      } catch (error) {
+        console.error("Error in verifying payment:", error);
+        return res.status(500).json({
+          success: false,
+          message:
+            "Internal server error during verification: " + error.message,
         });
       }
     });
