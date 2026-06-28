@@ -33,7 +33,7 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
 
     const DB = await client.db("BloodNet");
     const DonationRequest = DB.collection("DonationRequest");
@@ -553,13 +553,12 @@ async function run() {
       }
     });
 
-    app.get("/api/pending-request",  async (req, res) => {
+    app.get("/api/pending-request", async (req, res) => {
       try {
         const query = {
           status: "pending",
         };
 
-       
         if (req.query.search?.trim()) {
           query.$or = [
             {
@@ -577,7 +576,6 @@ async function run() {
           ];
         }
 
-        
         if (req.query.blood_group?.trim()) {
           query.blood_group = req.query.blood_group.trim();
         }
@@ -910,7 +908,76 @@ async function run() {
         });
       }
     });
-    await client.db("admin").command({ ping: 1 });
+
+    app.get("/api/my_funding", VerifyToken, async (req, res) => {
+      const query = {
+        userId: new ObjectId(req.user._id),
+      };
+
+      if (req.user.role === "admin" && req.query.status === "1") {
+        delete query.userId;
+      }
+
+      const [data] = await funding
+        .aggregate([
+          {
+            $match: query,
+          },
+          {
+            $facet: {
+              result: [
+                {
+                  $sort: { createdAt: -1 },
+                },
+              ],
+              summary: [
+                {
+                  $group: {
+                    _id: null,
+                    totalAmount: { $sum: "$amount" },
+                  },
+                },
+              ],
+            },
+          },
+        ])
+        .toArray();
+
+      res.send({
+        success: true,
+        result: data.result,
+        totalAmount: data.summary[0]?.totalAmount || 0,
+      });
+    });
+
+    app.get("/api/total_funding", async (req, res) => {
+      try {
+        const result = await funding
+          .aggregate([
+            {
+              $group: {
+                _id: null,
+                totalAmount: { $sum: "$amount" },
+              },
+            },
+          ])
+          .toArray();
+
+        res.status(200).send({
+          success: true,
+          totalAmount: result[0]?.totalAmount || 0,
+        });
+      } catch (error) {
+        console.error(error);
+
+        res.status(500).send({
+          success: false,
+          message: "Failed to calculate total funding.",
+          error: error.message,
+        });
+      }
+    });
+    //await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!",
     );
