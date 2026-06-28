@@ -122,7 +122,7 @@ async function run() {
 
       next();
     };
-    app.get("/api/allInfo", VerifyToken, async (req, res) => {
+    app.get("/api/allInfo", async (req, res) => {
       try {
         const [
           totalUsers,
@@ -553,6 +553,74 @@ async function run() {
       }
     });
 
+    app.get("/api/pending-request",  async (req, res) => {
+      try {
+        const query = {
+          status: "pending",
+        };
+
+       
+        if (req.query.search?.trim()) {
+          query.$or = [
+            {
+              recipient_name: {
+                $regex: req.query.search.trim(),
+                $options: "i",
+              },
+            },
+            {
+              hospital_name: {
+                $regex: req.query.search.trim(),
+                $options: "i",
+              },
+            },
+          ];
+        }
+
+        
+        if (req.query.blood_group?.trim()) {
+          query.blood_group = req.query.blood_group.trim();
+        }
+
+        if (req.query.district?.trim()) {
+          query.district = req.query.district.trim();
+        }
+
+        const page = Number(req.query.page) || 1;
+        const limit = Number(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+
+        const [result, total] = await Promise.all([
+          DonationRequest.find(query)
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .toArray(),
+
+          DonationRequest.countDocuments(query),
+        ]);
+
+        return res.status(200).json({
+          success: true,
+          data: result,
+          pagination: {
+            page,
+            limit,
+            total,
+            totalPages: Math.ceil(total / limit),
+            hasNext: page < Math.ceil(total / limit),
+            hasPrev: page > 1,
+          },
+        });
+      } catch (error) {
+        console.error("Error fetching pending requests:", error);
+
+        return res.status(500).json({
+          success: false,
+          message: "Internal server error",
+        });
+      }
+    });
     app.patch("/api/my-request/:id", VerifyToken, async (req, res) => {
       try {
         const query = {};
@@ -773,7 +841,6 @@ async function run() {
       }
     });
 
-   
     app.post("/api/verify-payment", VerifyToken, async (req, res) => {
       try {
         const { session_id } = req.body;
@@ -785,10 +852,8 @@ async function run() {
           });
         }
 
-       
         const session = await stripe.checkout.sessions.retrieve(session_id);
 
-       
         if (
           session.payment_status !== "paid" ||
           session.status !== "complete"
@@ -799,7 +864,6 @@ async function run() {
           });
         }
 
-       
         const sessionUserId = session.metadata?.userId;
         if (sessionUserId !== req.user._id.toString()) {
           return res.status(403).json({
@@ -808,7 +872,6 @@ async function run() {
           });
         }
 
-        
         const isAlreadyProcessed = await funding.findOne({
           stripeSessionId: session_id,
         });
@@ -819,14 +882,13 @@ async function run() {
           });
         }
 
-       
         const donationData = {
           userId: req.user._id,
           userName: req.user.name,
           userEmail: session.customer_details?.email || req.user.email,
           amount: Number(
             session.metadata?.amount || session.amount_total / 100,
-          ), 
+          ),
           stripeSessionId: session_id,
           paymentStatus: "COMPLETED",
           createdAt: new Date(),
