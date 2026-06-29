@@ -371,6 +371,13 @@ async function run() {
           });
         }
 
+        if (req.user.status == "blocked") {
+          return res.status(403).json({
+            success: false,
+            message: "Forbidden access",
+          });
+        }
+
         const donationRequest = {
           ...data,
           createdAt: new Date(),
