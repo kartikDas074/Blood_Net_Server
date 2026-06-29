@@ -233,6 +233,33 @@ async function run() {
       }
     });
 
+    app.get("/api/donor-data", async (req, res) => {
+      try {
+        const { grp, district, upazila } = req.query;
+
+        const query = {
+          blood_group: grp,
+          district,
+          upazila,
+        };
+
+        const donors = await userCollection.find(query).toArray();
+
+        res.status(200).send({
+          success: true,
+          count: donors.length,
+          data: donors,
+        });
+      } catch (error) {
+        console.error("Failed to fetch donors:", error);
+
+        res.status(500).send({
+          success: false,
+          message: "Failed to fetch donor data.",
+          error: error.message,
+        });
+      }
+    });
     app.patch("/user/:id", VerifyToken, verifyAdmin, async (req, res) => {
       try {
         const id = new ObjectId(req.params.id);
@@ -911,7 +938,7 @@ async function run() {
 
     app.get("/api/my_funding", VerifyToken, async (req, res) => {
       const query = {
-        userId: new ObjectId(req.user._id),
+        // userId: new ObjectId(req.user._id),
       };
 
       if (req.user.role === "admin" && req.query.status === "1") {
