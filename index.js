@@ -754,6 +754,8 @@ async function run() {
 
         const updateData = {
           status: "inprogress",
+          donor_name:req.user.name,
+          donor_email:req.user.email,
           updatedAt: new Date(),
         };
 
@@ -945,11 +947,11 @@ async function run() {
 
     app.get("/api/my_funding", VerifyToken, async (req, res) => {
       const query = {
-        // userId: new ObjectId(req.user._id),
+         
       };
 
-      if (req.user.role === "admin" && req.query.status === "1") {
-        delete query.userId;
+      if (req.query.status === "1") {
+        query.userId=new ObjectId(req.user._id)
       }
 
       const [data] = await funding
